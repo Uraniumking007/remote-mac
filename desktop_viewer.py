@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import socket
 import ssl
+import sys
 import threading
 import time
 
@@ -124,6 +125,22 @@ MAC_MODIFIERS = {55: "Command", 58: "Option", 59: "Control", 56: "Shift", None: 
 MODIFIER_DEFAULTS = {key: {62: 59, 60: 56}.get(MAC_KEYS[key], MAC_KEYS[key]) for key in REMAPPABLE_KEYS}
 
 
+# SDL scancodes for the six remappable modifiers, mapped to Win32 virtual keys.
+WINDOWS_MODIFIERS = {224: 0xA2, 225: 0xA0, 226: 0xA4,
+                     228: 0xA3, 229: 0xA1, 230: 0xA5}
+
+
+def windows_key_state():
+    if sys.platform != "win32":
+        return None
+    import ctypes
+
+    get_state = ctypes.WinDLL("user32").GetAsyncKeyState
+    get_state.argtypes = (ctypes.c_int,)
+    get_state.restype = ctypes.c_short
+    return get_state
+
+
 def load_key_mapping(path):
     mapping = MODIFIER_DEFAULTS.copy()
     try:
@@ -184,6 +201,7 @@ def window_loop(pg, clipboard, control, state, mode, notice, resize):
     settings_items = {}
     settings_keys = (*REMAPPABLE_KEYS, "reset", "done")
     held_keys = {}
+    physical_key_state = windows_key_state()
     held_buttons = set()
     clicks = {}
     click_counts = {}
@@ -197,6 +215,11 @@ def window_loop(pg, clipboard, control, state, mode, notice, resize):
             "x": min(1, max(0, (position[0] - area.x) / max(1, area.width - 1))),
             "y": min(1, max(0, (position[1] - area.y) / max(1, area.height - 1))),
         }
+
+    def release_key(scancode):
+        code = held_keys.pop(scancode, None)
+        if code is not None and code not in held_keys.values():
+            send("key", code=code, down=False)
 
     def release_input():
         nonlocal captured
@@ -400,9 +423,7 @@ def window_loop(pg, clipboard, control, state, mode, notice, resize):
                             send("key", code=code, down=True)
                         held_keys[event.scancode] = code
                 else:
-                    code = held_keys.pop(event.scancode, None)
-                    if code is not None and code not in held_keys.values():
-                        send("key", code=code, down=False)
+                    release_key(event.scancode)
             elif event.type == pg.MOUSEMOTION and (area.collidepoint(event.pos) or held_buttons):
                 send("move", **point(event.pos))
             elif event.type in (pg.MOUSEBUTTONDOWN, pg.MOUSEBUTTONUP) and event.button in MAC_BUTTONS:
@@ -422,6 +443,13 @@ def window_loop(pg, clipboard, control, state, mode, notice, resize):
             elif event.type == pg.MOUSEWHEEL and area.collidepoint(pg.mouse.get_pos()):
                 direction = -1 if event.flipped else 1
                 send("scroll", x=event.x * direction, y=event.y * direction)
+
+        # Windows can consume a modifier release while SDL still considers it held.
+        # Reconcile only forwarded downs, after processing the entire event batch.
+        if captured and physical_key_state is not None:
+            for scancode, virtual_key in WINDOWS_MODIFIERS.items():
+                if scancode in held_keys and not physical_key_state(virtual_key) & 0x8000:
+                    release_key(scancode)
 
         now = time.monotonic()
         if now - heartbeat >= 0.5:
