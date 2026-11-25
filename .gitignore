@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+*.app/
+*.zip
+/capture
+/control
+/windows/bin/
+/windows/obj/
+/windows/publish/
+/windows/ConnectionDefaults.txt
+shared-key
+device-key
+tls.key
