@@ -1,6 +1,7 @@
 """Wire format and authentication shared by the host and Windows viewer."""
 
 import argparse
+import hashlib
 import hmac
 import ipaddress
 import json
