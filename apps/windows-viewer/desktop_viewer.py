@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 
-from stream import CHUNK_SIZE, CONTROL_PORT, PORT, authenticate_viewer, receive_message, send_message
+from remote_mac_protocol import CHUNK_SIZE, CONTROL_PORT, PORT, authenticate_viewer, receive_message, send_message
 
 # SDL scancodes follow USB usage IDs. Values are macOS virtual key codes.
 MAC_KEYS = dict(zip(range(4, 30), (

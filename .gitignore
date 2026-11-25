@@ -9,3 +9,5 @@ __pycache__/
 shared-key
 device-key
 tls.key
+
+/dist/

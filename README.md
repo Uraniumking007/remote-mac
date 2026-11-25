@@ -1,42 +1,99 @@
-# Remote Mac prototype
+# Remote Mac
 
-View and control the Mac's existing desktop from Windows over Tailscale. The Mac must be awake, logged in, and unlocked. The prototype streams one selected display at a time and supports one Windows peer, keyboard shortcuts, clicks, dragging, scrolling, and explicit plain-text clipboard transfer.
+<img src="assets/branding/logo.svg" width="96" height="96" alt="Remote Mac logo">
 
-## Mac host
+View and control your Mac desktop from Windows. The Mac host captures one
+display at a time. The Windows viewer supports keyboard and mouse control,
+fullscreen, modifier mapping, and plain-text clipboard transfer.
 
-Install Python 3.10 or newer and use the Tailscale IPv4 addresses for both devices. Run these commands from this directory:
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `apps/mac-host/` | macOS menu-bar app, screen capture, virtual displays, input, and Python host |
+| `apps/windows-viewer/` | Python viewer, launcher, and bundled dependency versions |
+| `packages/protocol/` | Shared ports, authentication, and message framing |
+| `assets/branding/` | Logo and platform icons |
+| `scripts/` | Local setup and packaging |
+
+## Build and pair on LAN
+
+Use a trusted LAN and leave the Mac awake, logged in, and unlocked while
+setting up. There is one approved Windows PC per Mac host.
+
+1. On the Mac, install Xcode command-line tools and Python 3.10 or newer
+   with TLS 1.3 support. From the repository root, run:
+
+   ```sh
+   scripts/setup-mac-lan.sh
+   scripts/build-mac.sh MAC_LAN_IP /absolute/path/to/python3
+   ```
+
+   The setup script creates the local certificate if needed and prints
+   its SHA-256 fingerprint. Keep the private key on the Mac. The build
+   produces `dist/Remote-Mac-Mac-Host.zip`. The app uses the selected
+   Python installation, so build it on the Mac where it will run.
+
+2. Extract and open **Remote Mac Host.app**. Grant it **Screen & System
+   Audio Recording** and **Accessibility**, then reopen it if macOS
+   asks. Choose **Pair Windows PC…** in the menu bar, confirm the PC's
+   LAN IPv4 address, and keep the pairing key private. **Revoke Windows
+   PC…** stops the host and invalidates the credential.
+
+3. To build the Windows x64 bundle, install Python 3.10 or newer with
+   pip and a MinGW-w64 x64 compiler on the build machine. On a Mac, the
+   Homebrew `mingw-w64` formula provides the compiler.
+
+   ```sh
+   python3 scripts/build-windows.py MAC_LAN_IP CERTIFICATE_SHA256_FINGERPRINT
+   ```
+
+   Transfer `dist/Remote-Mac-Python-Windows-x64.zip` to Windows and extract
+   it. Double-click **Remote Mac.exe** with the bundled `runtime` folder
+   beside it. Enter the pairing key once to save it in Windows Credential
+   Manager. If you re-pair on the Mac, run **Replace pairing key.cmd**
+   once to update the saved key.
+
+The build scripts write artifacts to `dist/`. Host credentials stay in
+`~/Library/Application Support/Remote Mac Host/`. The two LAN connections
+use TCP ports 47332 and 47333, TLS 1.3, certificate pinning, and a pairing
+key. The menu-bar host also limits connections to the approved PC's IP.
+
+## Tailscale command-line mode
+
+The host and viewer use Tailscale encryption in this mode. Set
+`PYTHONPATH` to the checkout's `packages/protocol` directory before
+running either entry point. On the Mac, use the capture and control
+executables from the built app bundle:
 
 ```sh
-xcrun swiftc -O -parse-as-library Capture.swift -o capture
-xcrun clang -fobjc-arc -c VirtualDisplay.m -o /tmp/remote-mac-virtual.o
-xcrun swiftc -O -import-objc-header VirtualDisplay.h Control.swift /tmp/remote-mac-virtual.o -o control
-python3 -c 'import secrets; print(secrets.token_hex(32))'
-python3 stream.py host MAC_TAILSCALE_IP WINDOWS_TAILSCALE_IP --control ./control
+PYTHONPATH=packages/protocol python3 apps/mac-host/stream.py MAC_TAILSCALE_IP WINDOWS_TAILSCALE_IP \
+  --capture "/path/to/Remote Mac Host.app/Contents/MacOS/capture" \
+  --control "/path/to/Remote Mac Host.app/Contents/MacOS/control"
 ```
 
-Keep the generated key private and paste it at both prompts. Enable Screen Recording for the capture process and Accessibility for the control helper when macOS prompts. Restart the host and reconnect after granting permissions if needed. Use a trusted tailnet and allow TCP ports 47332 (video) and 47333 (input) from your Windows PC. Both connections authenticate with the shared key and rely on Tailscale for encryption. Stop the host with Ctrl+C.
-
-## Windows viewer
-
-Copy `stream.py` and `desktop_viewer.py` to Windows. With Python 3.10 or newer, open PowerShell in that directory:
+On Windows, install `apps/windows-viewer/requirements.txt` and run
+the desktop viewer from PowerShell:
 
 ```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install av pygame-ce pyperclip keyring
-.\.venv\Scripts\python.exe stream.py desktop MAC_TAILSCALE_IP
+$env:PYTHONPATH = (Resolve-Path .\packages\protocol).Path
+py -3 apps/windows-viewer/viewer.py desktop MAC_TAILSCALE_IP
 ```
 
-Windows stores the shared key in Credential Manager after authentication. Use `--replace-key` to enter a replacement.
+Enter the same randomly generated 32-byte key in hexadecimal on both
+machines. To use the optional ffplay-only baseline, run
+`viewer.py view MAC_TAILSCALE_IP`.
 
-Click the picture to take control. **F12** releases it. Focus loss also releases input, and a disconnected or unresponsive viewer causes the Mac helper to release its held keys and buttons. Close and reopen the viewer to reconnect.
+## Controls
 
-- **Ctrl** sends Mac Control, including **Ctrl+C** in a terminal. **Left Alt** sends Mac Command, so **Left Alt+C** copies on the Mac. **Right Alt** sends Option. Use a US-layout keyboard on both sides for this initial physical key map.
-- **F6** streams the built-in screen. **F7** adds a software 1920×1080 extended display. **F8** makes that virtual display primary. Click the picture to recapture input after switching. The virtual display is removed when the viewer disconnects.
-- **F10** sends the Windows plain-text clipboard to the Mac. **F11** fetches the Mac clipboard to Windows. The viewer reserves F10–F12 for these local controls.
-- The viewer scales the primary display to fit the window. It uses software H.264 decoding. The original ffplay-only baseline is still available with `stream.py view MAC_TAILSCALE_IP`.
+Click the remote picture to capture input. **F12** releases it. **F6**
+mirrors the built-in display, **F7** extends to a virtual 1920×1080
+display, and **F8** makes that display primary. The virtual display
+exists while connected. **F9** toggles fullscreen.
 
-## Compare with VNC
+**Left Alt** sends Mac Command and **Ctrl** stays Mac Control. Change
+modifier mappings in the Windows toolbar. **F10** sends Windows clipboard
+text to the Mac, and **F11** fetches Mac clipboard text.
 
-Use the same editor, terminal, resolution, and network for both tests. Type and select text, interrupt a running terminal command, drag and scroll, and move a multiline snippet both ways. Film the Windows keyboard and screen together in slow motion. Count frames between the keypress and visible change in the editor, then multiply by 1000 and divide by the recording frame rate. Repeat several times to capture both typical response and spikes. Check `tailscale ping` to see if the path was direct or relayed.
-
-This build covers the unlocked desktop. Lid-closed operation needs a physical test. Login-screen and wake support, automatic reconnect, international keyboard layouts, and file clipboard formats are outside this prototype.
+The viewer uses software H.264 decoding. To compare latency with VNC,
+test both viewers at the same resolution and on the same connection.

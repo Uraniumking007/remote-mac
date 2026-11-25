@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" fill="none">
+  <defs>
+    <!-- Squircle clip path -->
+    <clipPath id="tile-clip">
+      <path d="M152 16H360C456 16 496 56 496 152V360C496 456 456 496 360 496H152C56 496 16 456 16 360V152C16 56 56 16 152 16Z"/>
+    </clipPath>
+
+    <!-- Screen clip path -->
+    <clipPath id="screen-clip">
+      <rect x="98" y="120" width="316" height="204" rx="18"/>
+    </clipPath>
+
+    <!-- Deep cool navy tile background -->
+    <linearGradient id="bg-grad" x1="256" y1="16" x2="256" y2="496" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#152C52"/>
+      <stop offset="52%" stop-color="#0D1D3B"/>
+      <stop offset="100%" stop-color="#081226"/>
+    </linearGradient>
+
+    <!-- Ambient cool blue glow behind display -->
+    <radialGradient id="bg-glow" cx="256" cy="218" r="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2B6CE4" stop-opacity="0.42"/>
+      <stop offset="55%" stop-color="#1D4ED8" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#081226" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Subtle inner tile rim -->
+    <linearGradient id="tile-rim" x1="256" y1="16" x2="256" y2="496" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#93C5FD" stop-opacity="0.34"/>
+      <stop offset="35%" stop-color="#60A5FA" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#38BDF8" stop-opacity="0.08"/>
+    </linearGradient>
+
+    <!-- Display outer frame (brushed ice-silver) -->
+    <linearGradient id="bezel-grad" x1="256" y1="98" x2="256" y2="346" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FBFF"/>
+      <stop offset="58%" stop-color="#E2EEFC"/>
+      <stop offset="100%" stop-color="#BBD3EE"/>
+    </linearGradient>
+
+    <!-- Stand neck (receded cool aluminum) -->
+    <linearGradient id="neck-grad" x1="256" y1="344" x2="256" y2="386" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7FA2CA"/>
+      <stop offset="32%" stop-color="#A6C3E3"/>
+      <stop offset="100%" stop-color="#90B1D6"/>
+    </linearGradient>
+
+    <!-- Stand foot (crisp ice-silver bar) -->
+    <linearGradient id="foot-grad" x1="256" y1="382" x2="256" y2="408" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F1F7FE"/>
+      <stop offset="100%" stop-color="#B9D2EE"/>
+    </linearGradient>
+
+    <!-- Inner display glass surface -->
+    <linearGradient id="screen-grad" x1="98" y1="120" x2="414" y2="324" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0C1F42"/>
+      <stop offset="50%" stop-color="#112E61"/>
+      <stop offset="100%" stop-color="#174185"/>
+    </linearGradient>
+
+    <!-- Screen center cyan-blue radiance behind link -->
+    <radialGradient id="screen-glow" cx="256" cy="222" r="145" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.30"/>
+      <stop offset="65%" stop-color="#2563EB" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#0C1F42" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Subtle diagonal glass sheen -->
+    <linearGradient id="glass-sheen" x1="98" y1="120" x2="310" y2="270" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#BAE6FD" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#BAE6FD" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Left link ring (glacier sky-blue) -->
+    <linearGradient id="link-blue" x1="136" y1="172" x2="294" y2="272" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7DD3FC"/>
+      <stop offset="50%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#22A7F0"/>
+    </linearGradient>
+
+    <!-- Right link ring (crisp luminous white-ice) -->
+    <linearGradient id="link-white" x1="218" y1="172" x2="376" y2="272" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="65%" stop-color="#EFF6FF"/>
+      <stop offset="100%" stop-color="#CCE3FD"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App Icon Squircle Base -->
+  <g clip-path="url(#tile-clip)">
+    <path d="M152 16H360C456 16 496 56 496 152V360C496 456 456 496 360 496H152C56 496 16 456 16 360V152C16 56 56 16 152 16Z" fill="url(#bg-grad)"/>
+    <rect x="16" y="16" width="480" height="480" fill="url(#bg-glow)"/>
+  </g>
+
+  <!-- Crisp Tile Inner Rim -->
+  <path d="M152 17.5H360C455.2 17.5 494.5 56.8 494.5 152V360C494.5 455.2 455.2 494.5 360 494.5H152C56.8 494.5 17.5 455.2 17.5 360V152C17.5 56.8 56.8 17.5 152 17.5Z" stroke="url(#tile-rim)" stroke-width="3"/>
+
+  <!-- Soft Grounding Shadow Under Display & Stand -->
+  <rect x="76" y="110" width="360" height="248" rx="34" fill="#040A17" fill-opacity="0.45"/>
+  <rect x="166" y="390" width="180" height="26" rx="13" fill="#040A17" fill-opacity="0.42"/>
+
+  <!-- Minimalist Mac Display Stand -->
+  <path d="M226 344H286L298 386H214L226 344Z" fill="url(#neck-grad)"/>
+  <rect x="166" y="382" width="180" height="26" rx="13" fill="url(#foot-grad)"/>
+
+  <!-- Mac Display Outer Frame -->
+  <rect x="76" y="98" width="360" height="248" rx="34" fill="url(#bezel-grad)"/>
+
+  <!-- Inner Glass Screen -->
+  <g clip-path="url(#screen-clip)">
+    <rect x="98" y="120" width="316" height="204" rx="18" fill="url(#screen-grad)"/>
+    <rect x="98" y="120" width="316" height="204" fill="url(#screen-glow)"/>
+    <path d="M98 120H326L208 324H98V120Z" fill="url(#glass-sheen)"/>
+  </g>
+
+  <!-- Subtle Inner Screen Border -->
+  <rect x="99" y="121" width="314" height="202" rx="17" stroke="#60A5FA" stroke-opacity="0.22" stroke-width="2"/>
+
+  <!-- Interlocking Remote Link Mark -->
+  <!-- 1. Left Link Ring (Cool Glacier Blue) -->
+  <rect x="146" y="186" width="138" height="72" rx="36" stroke="url(#link-blue)" stroke-width="26"/>
+
+  <!-- 2. Top-Crossing Knockout so Right Ring Weaves Cleanly OVER Left Ring -->
+  <path d="M234 202A36 36 0 0 1 264 186H284" stroke="#112E61" stroke-width="40" stroke-linecap="round"/>
+
+  <!-- 3. Right Link Ring (Crisp Ice White) -->
+  <rect x="228" y="186" width="138" height="72" rx="36" stroke="url(#link-white)" stroke-width="26"/>
+
+  <!-- 4. Bottom-Crossing Knockout so Left Ring Weaves Cleanly OVER Right Ring -->
+  <path d="M278 242A36 36 0 0 1 248 258H228" stroke="#13346D" stroke-width="40" stroke-linecap="round"/>
+
+  <!-- 5. Left Ring Foreground Segment Crossing Over Bottom -->
+  <path d="M281 236A36 36 0 0 1 248 258H218" stroke="url(#link-blue)" stroke-width="26" stroke-linecap="round"/>
+</svg>

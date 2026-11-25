@@ -6,6 +6,11 @@ final class HostApp: NSObject, NSApplicationDelegate {
     private var item: NSStatusItem!
     private var status: NSMenuItem!
     private var host: Process?
+
+    private struct HostConfiguration: Decodable {
+        let address: String
+        let python: String
+    }
     private let state = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Remote Mac Host")
 
@@ -45,11 +50,11 @@ final class HostApp: NSObject, NSApplicationDelegate {
         FileManager.default.createFile(atPath: log.path, contents: nil)
         let output = try FileHandle(forWritingTo: log)
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: CommandLine.arguments.dropFirst().first ??
-            FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".local/share/uv/python/cpython-3.11.15-macos-aarch64-none/bin/python3.11").path)
+        let configURL = resources.appendingPathComponent("host-config.json")
+        let config = try JSONDecoder().decode(HostConfiguration.self, from: Data(contentsOf: configURL))
+        process.executableURL = URL(fileURLWithPath: config.python)
         process.arguments = [
-            "-u", resources.appendingPathComponent("stream.py").path, "host", "192.168.29.141", peer,
+            "-u", resources.appendingPathComponent("stream.py").path, config.address, peer,
             "--lan-cert", state.appendingPathComponent("tls.crt").path,
             "--lan-key", state.appendingPathComponent("tls.key").path,
             "--device-key-file", keyFile.path,
@@ -65,7 +70,7 @@ final class HostApp: NSObject, NSApplicationDelegate {
         }
         try process.run()
         host = process
-        status.title = "Listening on 192.168.29.141"
+        status.title = "Listening on \(config.address)"
     }
 
     private func stopHost() {
@@ -99,6 +104,12 @@ final class HostApp: NSObject, NSApplicationDelegate {
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { return }
         let token = bytes.map { String(format: "%02x", $0) }.joined()
+        guard ["tls.crt", "tls.key"].allSatisfy({
+            FileManager.default.fileExists(atPath: state.appendingPathComponent($0).path)
+        }) else {
+            status.title = "Missing LAN certificate · Run setup-mac-lan.sh"
+            return
+        }
         stopHost()
         let keyFile = state.appendingPathComponent("device-key")
         do {
