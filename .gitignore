@@ -6,10 +6,6 @@ __pycache__/
 *.zip
 /capture
 /control
-/windows/bin/
-/windows/obj/
-/windows/publish/
-/windows/ConnectionDefaults.txt
 shared-key
 device-key
 tls.key

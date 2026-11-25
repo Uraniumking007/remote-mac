@@ -3,7 +3,6 @@ import Foundation
 import ScreenCaptureKit
 import VideoToolbox
 
-private let framed = CommandLine.arguments.contains("--framed")
 private let startCode: [UInt8] = [0, 0, 0, 1]
 
 private func writeEncodedFrame(
@@ -54,18 +53,7 @@ private func writeEncodedFrame(
     }
     guard offset == bytes.count else { return }
     do {
-        if framed {
-            var length = UInt32(frame.count).bigEndian
-            var pts = CMTimeConvertScale(sample.presentationTimeStamp, timescale: 1_000_000,
-                                         method: .roundTowardZero).value.bigEndian
-            var header = Data(bytes: &length, count: 4)
-            header.append(isKeyframe ? 1 : 0)
-            header.append(Data(bytes: &pts, count: 8))
-            header.append(frame)
-            try FileHandle.standardOutput.write(contentsOf: header)
-        } else {
-            try FileHandle.standardOutput.write(contentsOf: frame)
-        }
+        try FileHandle.standardOutput.write(contentsOf: frame)
     } catch {
         exit(1)
     }
@@ -164,12 +152,6 @@ struct Main {
         let height = Int(Double(sourceHeight) * scale) / 2 * 2
         let capture = try Capture(width: width, height: height)
         let stream = try capture.makeStream(display: display, width: width, height: height)
-        if framed {
-            var dimensions = [UInt32(width).bigEndian, UInt32(height).bigEndian]
-            try dimensions.withUnsafeMutableBytes { bytes in
-                try FileHandle.standardOutput.write(contentsOf: Data(bytes))
-            }
-        }
         try await stream.startCapture()
         fputs("Capturing \(width)×\(height) at up to 60 fps\n", stderr)
         while true {

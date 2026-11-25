@@ -143,8 +143,6 @@ def parse_control(data):
         fields = {axis: lambda v: int_between(v, -120, 120) for axis in ("x", "y")}
     elif kind == "clipboard-set":
         fields = {"text": lambda v: isinstance(v, str) and len(v.encode("utf-8")) <= 128_000}
-    elif kind == "video-format":
-        fields = {"format": lambda v: v == "framed-h264"}
     elif kind == "display-mode":
         fields = {"mode": lambda v: v in ("mirror", "extend", "primary")}
     else:
@@ -174,10 +172,6 @@ def serve_control(listener, viewer, helper, key, selection, tls=None):
                                 message = parse_control(receive_message(session, time.monotonic() + 8))
                                 kind = message["kind"]
                                 if kind == "heartbeat":
-                                    continue
-                                if kind == "video-format":
-                                    selection["framed"] = True
-                                    send_message(session, {"format": "framed-h264"})
                                     continue
                                 process.stdin.write(json.dumps(message).encode("ascii") + b"\n")
                                 process.stdin.flush()
@@ -227,8 +221,6 @@ def serve(host, viewer, capture, key, tls=None, selection=None):
                         print(f"Authenticated {peer}", flush=True)
                         display = selection.get("display") if selection else None
                         command = [capture, str(display)] if display is not None else [capture]
-                        if selection and selection.get("framed"):
-                            command.append("--framed")
                         with subprocess.Popen(command, stdout=subprocess.PIPE, bufsize=0) as process:
                             try:
                                 while True:
