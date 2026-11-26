@@ -270,13 +270,61 @@ def _prepare_msys_env() -> None:
     os.environ.setdefault("MSYSTEM", "MSYS")
 
 
+def msys_root(environ: os._Environ[str] | dict[str, str]) -> Path:
+    """MSYS2 prefix that contains usr/bin/make.exe beside msys-2.0.dll."""
+    candidates: list[Path] = []
+    location = environ.get("MSYS2_LOCATION")
+    if location:
+        candidates.append(Path(location))
+    runner_temp = environ.get("RUNNER_TEMP")
+    if runner_temp:
+        candidates.append(Path(runner_temp) / "msys64")
+    candidates.append(Path(r"C:\msys64"))
+    for root in candidates:
+        usr = root / "usr" / "bin"
+        if (usr / "make.exe").is_file() and (usr / "sh.exe").is_file() and (usr / "msys-2.0.dll").is_file():
+            return root
+    raise SystemExit(
+        "MSYS2 GNU make was not found. FFmpeg's MSVC build needs "
+        "usr/bin/make.exe next to msys-2.0.dll (set MSYS2_LOCATION). "
+        r"C:\mingw64\bin\make.exe is MinGW make and drops a backslash from "
+        "the MSVC dependency recipe, so awk sees gsub(/\\/, \"/\") and exits."
+    )
+
+
+def msys_make_invocation(
+    environ: os._Environ[str] | dict[str, str],
+    *,
+    platform: str,
+) -> tuple[list[str], dict[str, str]]:
+    """argv and env for GNU make.
+
+    On Windows the binary is MSYS2 usr/bin/make.exe and SHELL is /usr/bin/sh
+    from that same prefix. MinGW make (the runner image's
+    C:\\mingw64\\bin\\make.exe) rewrites the recipe through the Windows
+    command line and turns FFmpeg's gsub(/\\\\/, "/") into gsub(/\\/, "/").
+    MSYS make does the same if SHELL is Git bash (a different msys-2.0.dll)
+    instead of this prefix's /usr/bin/sh. usr/bin is not prepended to PATH:
+    that would shadow MSVC link.exe with MSYS link.exe.
+    """
+    env = dict(environ)
+    if platform != "win32":
+        if shutil.which("make", path=env.get("PATH")) is None:
+            raise SystemExit("make is not on PATH. FFmpeg's build needs GNU make.")
+        return ["make"], env
+    root = msys_root(env)
+    env["MSYSTEM"] = "MSYS"
+    env.setdefault("MSYS2_PATH_TYPE", "inherit")
+    env["SHELL"] = "/usr/bin/sh"
+    return [str(root / "usr" / "bin" / "make.exe")], env
+
+
 def build_ffmpeg() -> None:
     _prepare_msys_env()
     bash = shutil.which("bash")
     if bash is None:
         raise SystemExit("bash is required to run FFmpeg's configure script.")
-    if shutil.which("make") is None:
-        raise SystemExit("make is not on PATH. FFmpeg's build needs GNU make (MSYS2 make on Windows).")
+    make_cmd, make_env = msys_make_invocation(os.environ, platform=sys.platform)
     if sys.platform == "win32" and shutil.which("cl") is None:
         raise SystemExit(
             "cl.exe is not on PATH. Start the x64 Native Tools shell for Visual Studio, "
@@ -291,8 +339,8 @@ def build_ffmpeg() -> None:
     configure = source / "configure"
     subprocess.run([bash, str(configure), *flags], cwd=source, check=True)
     jobs = str(os.cpu_count() or 1)
-    subprocess.run(["make", f"-j{jobs}"], cwd=source, check=True)
-    subprocess.run(["make", "install"], cwd=source, check=True)
+    subprocess.run([*make_cmd, f"-j{jobs}"], cwd=source, env=make_env, check=True)
+    subprocess.run([*make_cmd, "install"], cwd=source, env=make_env, check=True)
     legal = STAGING_DIR / "legal" / "ffmpeg"
     legal.mkdir(parents=True, exist_ok=True)
     for name in ("LICENSE.md", "COPYING.LGPLv2.1", "config.h", "config_components.h"):
