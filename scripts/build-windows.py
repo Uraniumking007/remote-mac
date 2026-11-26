@@ -55,7 +55,7 @@ def _compile_launcher(stage, output):
             compiled = stage / "logo.res"
             subprocess.run(["rc", "/nologo", f"/fo{compiled}", str(resource)], cwd=stage, check=True)
             command.append(str(compiled))
-        command.extend(["/link", "/SUBSYSTEM:CONSOLE", "/ENTRY:wmainCRTStartup"])
+        command.extend(["/link", "/SUBSYSTEM:CONSOLE", "/ENTRY:wmainCRTStartup", "user32.lib"])
         subprocess.run(command, cwd=stage, check=True)
         built.replace(output)
         return
