@@ -1,7 +1,11 @@
 # Manual Windows x64 viewer build for a person to download and test.
-# Builds pinned LGPL FFmpeg and MSVC PyAV on the runner. Does not play
+# FFmpeg is cross-compiled on Linux with the MinGW w32threads flags.
+# The Windows job links MSVC PyAV against import libraries from those
+# .def files, then packages the ZIP and NSIS installer. It does not play
 # video, sign, or publish. The codec gate inside the build scripts still
 # refuses a bundle that fails the license checks.
+# The staging artifact is only there so the Windows job can consume the
+# Linux prefix. Download the ZIP and Setup.exe to test.
 
 name: Windows x64 viewer
 
@@ -10,17 +14,16 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 env:
-  MSYS2_PATH_TYPE: inherit
-  MSYSTEM: MSYS
   REMOTE_MAC_REQUIRE_INSTALLER: "1"
 
 jobs:
-  package:
-    name: ZIP and NSIS installer
-    runs-on: windows-2022
-    timeout-minutes: 180
+  ffmpeg:
+    name: MinGW LGPL FFmpeg
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -32,17 +35,95 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: MSYS2 make
-        id: msys2
-        uses: msys2/setup-msys2@v2
+      - name: MinGW-w64
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils-mingw-w64-x86-64 \
+            gcc-mingw-w64-x86-64 \
+            g++-mingw-w64-x86-64 \
+            gcc-mingw-w64-x86-64-win32 \
+            g++-mingw-w64-x86-64-win32 \
+            gcc-mingw-w64-x86-64-posix \
+            g++-mingw-w64-x86-64-posix \
+            make \
+            pkg-config \
+            xz-utils
+          if [ -x /usr/bin/x86_64-w64-mingw32-gcc-win32 ]; then
+            sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-win32
+            sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-win32
+          fi
+          command -v x86_64-w64-mingw32-gcc
+          command -v make
+          x86_64-w64-mingw32-gcc -v
+
+      - name: Pinned LGPL FFmpeg
+        run: python scripts/windows_codec_lgpl.py ffmpeg
+
+      - name: Staging prefix
+        run: |
+          set -eu
+          test -f third_party/ffmpeg-lgpl-win-x64/bin/avcodec-63.dll
+          test -f third_party/ffmpeg-lgpl-win-x64/lib/avcodec-63.def
+          test -f third_party/ffmpeg-lgpl-win-x64/legal/ffmpeg/BUILD.txt
+          PYTHONPATH=scripts python - <<'PY'
+          from pathlib import Path
+          import windows_codec_lgpl as pin
+          import verify_windows_codecs as gate
+          root = Path("third_party/ffmpeg-lgpl-win-x64")
+          config = (root / "legal/ffmpeg/config.h").read_text(encoding="utf-8", errors="replace")
+          found = gate._defines(config)
+          for key, value in pin.REQUIRED_CONFIG_H.items():
+              got = found.get(key)
+              if got != value:
+                  raise SystemExit(f"config.h {key} is {got!r}, expected {value!r}")
+          banned = {name.lower() for name in ("libgcc_s_seh-1.dll", "libwinpthread-1.dll", "libstdc++-6.dll")}
+          for dll in (root / "bin").glob("*.dll"):
+              imports = {item.lower() for item in gate.pe_import_dlls(dll.read_bytes())}
+              hit = sorted(imports & banned)
+              if hit:
+                  raise SystemExit(f"{dll.name} imports {hit}")
+          print("staging config.h and DLL imports passed")
+          PY
+
+      - name: Upload FFmpeg staging
+        uses: actions/upload-artifact@v6
         with:
-          msystem: MSYS
-          update: false
-          path-type: inherit
-          install: >-
-            make
-            diffutils
-            pkgconf
+          name: ffmpeg-lgpl-win-x64-staging
+          if-no-files-found: error
+          retention-days: 1
+          path: third_party/ffmpeg-lgpl-win-x64
+
+  package:
+    name: ZIP and NSIS installer
+    needs: ffmpeg
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: FFmpeg staging
+        uses: actions/download-artifact@v7
+        with:
+          name: ffmpeg-lgpl-win-x64-staging
+          path: third_party/ffmpeg-lgpl-win-x64
+
+      - name: Staging layout
+        shell: pwsh
+        run: |
+          $dll = "third_party\ffmpeg-lgpl-win-x64\bin\avcodec-63.dll"
+          $definition = "third_party\ffmpeg-lgpl-win-x64\lib\avcodec-63.def"
+          if (-not (Test-Path -LiteralPath $dll)) { throw "missing $dll" }
+          if (-not (Test-Path -LiteralPath $definition)) { throw "missing $definition" }
+
+      - name: Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
 
       - name: MSVC x64
         shell: pwsh
@@ -65,6 +146,8 @@ jobs:
             $value = $line.Substring($eq + 1)
             Add-Content -Path $env:GITHUB_ENV -Value "$name=$value" -Encoding utf8NoBOM
           }
+          "DISTUTILS_USE_SDK=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8NoBOM
+          "MSSdk=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8NoBOM
 
       - name: NSIS
         shell: pwsh
@@ -75,7 +158,9 @@ jobs:
           if (-not (Test-Path "$nsis\makensis.exe")) { throw "makensis.exe missing after choco install" }
           $env:PATH = "$nsis;$env:PATH"
           $nsis | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
-          foreach ($tool in @("cl", "link", "lib", "rc", "bash", "make", "makensis", "python")) {
+          $version = & "$nsis\makensis.exe" /VERSION
+          if ($version -notmatch '^v3\.') { throw "makensis must be NSIS 3, got: $version" }
+          foreach ($tool in @("cl", "link", "lib", "rc", "makensis", "python")) {
             $found = Get-Command $tool -ErrorAction SilentlyContinue
             if (-not $found) { throw "missing $tool on PATH" }
             Write-Output "$tool -> $($found.Source)"
@@ -84,10 +169,8 @@ jobs:
       - name: PyAV build dependencies
         run: python -m pip install --disable-pip-version-check "cython>=3" "setuptools>=61"
 
-      - name: Pinned LGPL FFmpeg and MSVC PyAV
-        env:
-          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
-        run: python scripts/windows_codec_lgpl.py all
+      - name: MSVC PyAV
+        run: python scripts/windows_codec_lgpl.py pyav
 
       - name: Portable ZIP and installer
         run: python scripts/build-windows.py
@@ -98,6 +181,8 @@ jobs:
           @"
           Artifacts are for manual Windows testing.
 
+          - FFmpeg was cross-compiled with MinGW on the Linux job. The staging artifact is internal.
+          - PyAV was compiled with MSVC against import libraries from the MinGW .def files.
           - The codec license gate ran inside the build scripts.
           - This run did not play video and does not mark playback as tested.
           - The ZIP and Setup.exe are not signed and were not published.

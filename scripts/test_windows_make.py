@@ -67,5 +67,34 @@ class MsysMakeTests(unittest.TestCase):
         self.assertIn(r"C:\mingw64\bin\make.exe", str(caught.exception))
 
 
+class MingwPyavTests(unittest.TestCase):
+    def test_posix_mingw_links_winpthread_statically_and_win32_does_not(self) -> None:
+        self.assertEqual(codec.mingw_ldflags("win32"), "-static-libgcc")
+        posix = codec.mingw_ldflags("posix")
+        self.assertIn("-static-libgcc", posix)
+        self.assertIn("-lwinpthread", posix)
+        self.assertIn("-Bstatic", posix)
+        self.assertNotIn("--enable-pthreads", posix)
+
+    def test_msvc_def_names_the_soname_when_library_is_missing(self) -> None:
+        text = codec.msvc_import_def("EXPORTS\n    avcodec_version\n", "avcodec-63.dll")
+        self.assertTrue(text.startswith("LIBRARY avcodec-63.dll\n"))
+        self.assertIn("avcodec_version", text)
+        self.assertNotIn("avcodec.dll\n", text)
+
+    def test_msvc_def_replaces_a_wrong_library_line(self) -> None:
+        text = codec.msvc_import_def(
+            "LIBRARY libavcodec.dll.a\nEXPORTS\navcodec_version\n",
+            "avcodec-63.dll",
+        )
+        self.assertEqual(text.count("LIBRARY"), 1)
+        self.assertIn("LIBRARY avcodec-63.dll\n", text)
+        self.assertNotIn("libavcodec.dll.a", text)
+
+    def test_msvc_def_rejects_a_dll_name_that_would_break_the_line(self) -> None:
+        with self.assertRaises(SystemExit):
+            codec.msvc_import_def("EXPORTS\n", "avcodec-63.dll\nLIBRARY kernel32.dll")
+
+
 if __name__ == "__main__":
     unittest.main()

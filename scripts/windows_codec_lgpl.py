@@ -19,10 +19,12 @@ import argparse
 import hashlib
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 from urllib.request import urlretrieve
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -244,6 +246,28 @@ def filtered_requirements(path: Path) -> str:
     return "\n".join(kept) + "\n"
 
 
+def mingw_thread_model(gcc: str) -> str:
+    """Return ``win32`` or ``posix`` from ``gcc -v``. Empty when it is not printed."""
+    result = subprocess.run([gcc, "-v"], capture_output=True, text=True, check=False)
+    for line in (result.stderr + "\n" + result.stdout).splitlines():
+        if line.lower().startswith("thread model:"):
+            return line.split(":", 1)[1].strip().lower()
+    return ""
+
+
+def mingw_ldflags(thread_model: str) -> str:
+    """Keep the verified w32threads link line.
+
+    The posix MinGW runtime's libgcc imports libwinpthread-1.dll. Link that
+    library statically so the DLLs stay on w32threads and the verifier's ban
+    on libwinpthread-1.dll still holds. The win32 runtime does not need it.
+    """
+    ldflags = "-static-libgcc"
+    if thread_model == "posix":
+        ldflags += " -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic"
+    return ldflags
+
+
 def _host_flags(prefix: Path) -> list[str]:
     flags = [f"--prefix={prefix.as_posix()}"]
     if sys.platform == "win32":
@@ -257,7 +281,7 @@ def _host_flags(prefix: Path) -> list[str]:
         "--arch=x86_64",
         "--target-os=mingw32",
         "--cross-prefix=x86_64-w64-mingw32-",
-        "--extra-ldflags=-static-libgcc",
+        "--extra-ldflags=" + mingw_ldflags(mingw_thread_model(gcc)),
     ])
     return flags
 
@@ -367,8 +391,9 @@ def build_ffmpeg() -> None:
         "x86 assembly is disabled (--disable-x86asm) so the pin does not assume nasm is installed. "
         "The native C H.264 decoder is still enabled. A faster build installs nasm, passes "
         "--enable-x86asm instead, and updates this pin and scripts/verify_windows_codecs.py together.",
-        "MinGW links with --extra-ldflags=-static-libgcc and --enable-w32threads so the DLLs do not "
-        "depend on libgcc_s_seh-1.dll or libwinpthread-1.dll. An MSVC build omits the libgcc flag.",
+        "MinGW links with -static-libgcc and --enable-w32threads so the DLLs do not "
+        "depend on libgcc_s_seh-1.dll or libwinpthread-1.dll. A posix-thread MinGW "
+        "compiler also links libwinpthread statically. An MSVC build omits the libgcc flag.",
         "This tree does not claim the MSVC and MinGW DLL ABIs match until PyAV is built and loaded "
         "on Windows. No Windows playback test is run by this script.",
         "",
@@ -410,6 +435,31 @@ def _assert_ffmpeg_bin() -> None:
         raise SystemExit("FFmpeg build failed the license check:\n" + "\n".join(errors))
 
 
+def msvc_import_def(text: str, dll_name: str) -> str:
+    """Name the SONAME in a MinGW .def before MSVC lib.exe reads it.
+
+    FFmpeg's installed .def starts at EXPORTS and has no LIBRARY line.
+    lib.exe then names the DLL after the .lib (avcodec.dll). PyAV must
+    import avcodec-63.dll, which is the file the bundle ships.
+    """
+    if re.fullmatch(r"[A-Za-z0-9_.-]+", dll_name) is None:
+        raise SystemExit(f"Refusing DLL name {dll_name!r} in an import .def.")
+    replaced = False
+    lines: list[str] = []
+    for line in text.splitlines():
+        if re.match(r"(?i)\s*LIBRARY\b", line):
+            lines.append(f"LIBRARY {dll_name}")
+            replaced = True
+        else:
+            lines.append(line)
+    body = "\n".join(lines)
+    if body and not body.endswith("\n"):
+        body += "\n"
+    if not replaced:
+        body = f"LIBRARY {dll_name}\n{body}"
+    return body
+
+
 def _msvc_import_libs() -> None:
     lib_tool = shutil.which("lib")
     if lib_tool is None:
@@ -418,17 +468,23 @@ def _msvc_import_libs() -> None:
             "and the other library names. Generate them from the .def files with lib.exe."
         )
     library_dir = STAGING_DIR / "lib"
-    for name in SONAME_DLLS:
-        stem = name[: -len(".dll")]
-        definition = library_dir / f"{stem}.def"
-        if not definition.is_file():
-            raise SystemExit(f"Missing {definition}. The shared FFmpeg install did not export a .def file.")
-        output = library_dir / f"{stem.split('-')[0]}.lib"
-        subprocess.run(
-            [lib_tool, "/nologo", "/MACHINE:X64", f"/DEF:{definition}", f"/OUT:{output}"],
-            cwd=library_dir,
-            check=True,
-        )
+    with tempfile.TemporaryDirectory(prefix="ffmpeg-implib-") as tmp:
+        for name in SONAME_DLLS:
+            stem = name[: -len(".dll")]
+            definition = library_dir / f"{stem}.def"
+            if not definition.is_file():
+                raise SystemExit(f"Missing {definition}. The shared FFmpeg install did not export a .def file.")
+            generated = Path(tmp) / f"{stem}.def"
+            generated.write_text(
+                msvc_import_def(definition.read_text(encoding="utf-8"), name),
+                encoding="ascii",
+            )
+            output = library_dir / f"{stem.split('-')[0]}.lib"
+            subprocess.run(
+                [lib_tool, "/nologo", "/MACHINE:X64", f"/DEF:{generated}", f"/OUT:{output}"],
+                cwd=tmp,
+                check=True,
+            )
 
 
 def build_pyav() -> None:
@@ -492,6 +548,7 @@ def build_pyav() -> None:
             f"The rejected wheel sha256 is {PYAV_WHEEL_SHA256}. That wheel is not redistributed.",
             f"Command: {sys.executable} setup.py build_ext --inplace --ffmpeg-dir={STAGING_DIR}",
             "Import libraries were created with lib.exe from the FFmpeg .def files.",
+            "Each .def LIBRARY line names the SONAME DLL, such as avcodec-63.dll.",
             "",
         ]),
         encoding="utf-8",
