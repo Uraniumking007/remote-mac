@@ -70,6 +70,13 @@ def _compile_launcher(stage, output):
     subprocess.run([*command, "-o", str(output)], check=True)
 
 
+def _nsis_path(path):
+    # makensis File search does not match a forward-slash filespec on Windows.
+    if sys.platform == "win32":
+        return str(path)
+    return path.as_posix()
+
+
 def build_installer(bundle, dist):
     windows_codec_lgpl.assert_release_bundle(bundle)
     compiler = shutil.which("makensis")
@@ -86,12 +93,12 @@ def build_installer(bundle, dist):
     command = [
         compiler,
         f"-DAPP_VERSION={VIEWER_VERSION}",
-        f"-DSTAGE={bundle.as_posix()}",
-        f"-DOUTFILE={output.as_posix()}",
+        f"-DSTAGE={_nsis_path(bundle)}",
+        f"-DOUTFILE={_nsis_path(output)}",
     ]
     icon = ROOT / "assets/branding/RemoteMac.ico"
     if icon.is_file():
-        command.append(f"-DAPP_ICON={icon.as_posix()}")
+        command.append(f"-DAPP_ICON={_nsis_path(icon)}")
     command.append(str(ROOT / "scripts" / "windows-installer.nsi"))
     subprocess.run(command, check=True)
     print(output)

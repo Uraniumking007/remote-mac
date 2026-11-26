@@ -72,7 +72,7 @@ Page instfiles
 
 Section
   SetOutPath "$INSTDIR"
-  File /r "${STAGE}/*.*"
+  File /r "${STAGE}\*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   WriteRegStr HKCU "${INSTALL_KEY}" "InstallLocation" "$INSTDIR"
