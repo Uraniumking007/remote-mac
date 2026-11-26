@@ -11,3 +11,5 @@ device-key
 tls.key
 
 /dist/
+/third_party/cache/
+/third_party/ffmpeg-lgpl-win-x64/

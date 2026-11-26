@@ -1,0 +1,93 @@
+# Manual Windows x64 viewer build for a person to download and test.
+# Builds pinned LGPL FFmpeg and MSVC PyAV on the runner. Does not play
+# video, sign, or publish. The codec gate inside the build scripts still
+# refuses a bundle that fails the license checks.
+
+name: Windows x64 viewer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MSYS2_PATH_TYPE: inherit
+  MSYSTEM: MSYS
+  REMOTE_MAC_REQUIRE_INSTALLER: "1"
+
+jobs:
+  package:
+    name: ZIP and NSIS installer
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: MSYS2 make
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          update: false
+          path-type: inherit
+          install: >-
+            make
+            diffutils
+            pkgconf
+
+      - name: MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: NSIS
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress -y
+          if ($LASTEXITCODE -eq 3010) { $global:LASTEXITCODE = 0 }
+          $nsis = "C:\Program Files (x86)\NSIS"
+          if (-not (Test-Path "$nsis\makensis.exe")) { throw "makensis.exe missing after choco install" }
+          $env:PATH = "$nsis;$env:PATH"
+          $nsis | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+          foreach ($tool in @("cl", "link", "lib", "rc", "bash", "make", "makensis", "python")) {
+            $found = Get-Command $tool -ErrorAction SilentlyContinue
+            if (-not $found) { throw "missing $tool on PATH" }
+            Write-Output "$tool -> $($found.Source)"
+          }
+
+      - name: PyAV build dependencies
+        run: python -m pip install --disable-pip-version-check "cython>=3" "setuptools>=61"
+
+      - name: Pinned LGPL FFmpeg and MSVC PyAV
+        run: python scripts/windows_codec_lgpl.py all
+
+      - name: Portable ZIP and installer
+        run: python scripts/build-windows.py
+
+      - name: What this run did not do
+        shell: pwsh
+        run: |
+          @"
+          Artifacts are for manual Windows testing.
+
+          - The codec license gate ran inside the build scripts.
+          - This run did not play video and does not mark playback as tested.
+          - The ZIP and Setup.exe are not signed and were not published.
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload ZIP and installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote-mac-windows-x64
+          if-no-files-found: error
+          path: |
+            dist/Remote-Mac-Python-Windows-x64.zip
+            dist/Remote-Mac-Windows-x64-*-Setup.exe
