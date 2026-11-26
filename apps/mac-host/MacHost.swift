@@ -17,12 +17,19 @@ final class HostApp: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "Remote Mac"
+        if let icon = Bundle.main.url(forResource: "RemoteMac", withExtension: "icns"),
+           let image = NSImage(contentsOf: icon) {
+            image.size = NSSize(width: 19, height: 19)
+            item.button?.image = image
+            item.button?.imagePosition = .imageLeading
+        }
         let menu = NSMenu()
         status = menu.addItem(withTitle: "Starting…", action: nil, keyEquivalent: "")
         for (title, action) in [
             ("Screen Recording Settings…", #selector(screenSettings)),
             ("Accessibility Settings…", #selector(accessibilitySettings)),
             ("Pair Windows PC…", #selector(pairWindows)),
+            ("Show paired key…", #selector(showPairedKey)),
             ("Revoke Windows PC…", #selector(revokeWindows)),
             ("Open Host Log", #selector(openLog)),
             ("Quit Remote Mac Host", #selector(quit))
@@ -124,15 +131,43 @@ final class HostApp: NSObject, NSApplicationDelegate {
             status.title = error.localizedDescription
             return
         }
-        let result = NSAlert()
-        result.messageText = "Enter this pairing key on Windows"
-        let field = NSTextField(labelWithString: token)
+        presentPairingKey(token)
+    }
+
+    @objc private func showPairedKey() {
+        NSApp.activate()
+        let keyFile = state.appendingPathComponent("device-key")
+        guard let key = try? String(contentsOf: keyFile, encoding: .utf8) else {
+            let alert = NSAlert()
+            alert.messageText = "No Windows PC is paired"
+            alert.informativeText = "Choose Pair Windows PC… to approve a PC."
+            alert.runModal()
+            return
+        }
+        presentPairingKey(key.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func presentPairingKey(_ key: String) {
+        let alert = NSAlert()
+        alert.messageText = "Enter this pairing key on Windows"
+        alert.informativeText = "Transfer the key privately to your approved PC."
+        let field = NSTextField(labelWithString: key)
         field.isSelectable = true
         field.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        field.frame = NSRect(x: 0, y: 0, width: 440, height: 24)
-        result.accessoryView = field
-        result.addButton(withTitle: "Done")
-        result.runModal()
+        field.frame = NSRect(x: 0, y: 0, width: 460, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Copy pairing key")
+        alert.addButton(withTitle: "Done")
+        if alert.runModal() == .alertFirstButtonReturn {
+            let clipboard = NSPasteboard.general
+            clipboard.clearContents()
+            if !clipboard.setString(key, forType: .string) {
+                let error = NSAlert()
+                error.messageText = "Could not copy the pairing key"
+                error.informativeText = "Open Show paired key… to select and copy it manually."
+                error.runModal()
+            }
+        }
     }
 
     @objc private func revokeWindows() {

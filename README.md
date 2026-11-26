@@ -37,8 +37,9 @@ setting up. There is one approved Windows PC per Mac host.
 2. Extract and open **Remote Mac Host.app**. Grant it **Screen & System
    Audio Recording** and **Accessibility**, then reopen it if macOS
    asks. Choose **Pair Windows PC…** in the menu bar, confirm the PC's
-   LAN IPv4 address, and keep the pairing key private. **Revoke Windows
-   PC…** stops the host and invalidates the credential.
+   LAN IPv4 address, and choose **Copy pairing key** to transfer it
+   privately. **Show paired key…** lets you retrieve it again. **Revoke
+   Windows PC…** stops the host and invalidates the credential.
 
 3. To build the Windows x64 bundle, install Python 3.10 or newer with
    pip and a MinGW-w64 x64 compiler on the build machine. On a Mac, the
