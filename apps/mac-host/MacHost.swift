@@ -61,7 +61,7 @@ final class HostApp: NSObject, NSApplicationDelegate {
         let config = try JSONDecoder().decode(HostConfiguration.self, from: Data(contentsOf: configURL))
         process.executableURL = URL(fileURLWithPath: config.python)
         process.arguments = [
-            "-u", resources.appendingPathComponent("stream.py").path, config.address, peer,
+            "-B", "-u", resources.appendingPathComponent("stream.py").path, config.address, peer,
             "--lan-cert", state.appendingPathComponent("tls.crt").path,
             "--lan-key", state.appendingPathComponent("tls.key").path,
             "--device-key-file", keyFile.path,
