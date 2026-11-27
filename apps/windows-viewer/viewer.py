@@ -11,6 +11,19 @@ import sys
 
 from remote_mac_protocol import PORT, CHUNK_SIZE, authenticate_viewer, tailnet_ip
 
+PAIRING_PROMPT = "Pairing key (64 hex characters from the Mac menu, not the certificate fingerprint): "
+SAVED_PAIRING_NOTE = "Using the saved pairing key for this Mac."
+AUTH_FAILURE_HINT = (
+    "On the Mac, use Show paired key… or pair again, then run Replace pairing key.cmd."
+)
+
+
+def authentication_failure_text(message):
+    text = str(message)
+    if "authentication failed" in text.lower():
+        return f"{text}\n{AUTH_FAILURE_HINT}"
+    return text
+
 
 def stop(process):
     if process.poll() is None:
@@ -92,7 +105,9 @@ def main():
             saved = vault.get_password("Remote Mac Paired Viewer", account)
 
     try:
-        key = bytes.fromhex(saved or os.environ.pop("REMOTE_MAC_KEY", None) or getpass.getpass("Pairing key: "))
+        if saved:
+            print(SAVED_PAIRING_NOTE, file=sys.stderr)
+        key = bytes.fromhex(saved or os.environ.pop("REMOTE_MAC_KEY", None) or getpass.getpass(PAIRING_PROMPT))
     except ValueError:
         parser.error("Use a 64-character hexadecimal key")
     if len(key) != 32:
@@ -111,6 +126,8 @@ def main():
             desktop_viewer.run(args.address, key, args.fingerprint, remember_key)
     except KeyboardInterrupt:
         pass
+    except ConnectionError as error:
+        parser.exit(1, f"{authentication_failure_text(error)}\n")
     except OSError as error:
         parser.exit(1, f"{error}\n")
 

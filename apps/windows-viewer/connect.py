@@ -76,9 +76,14 @@ def resolve_connection(user_path, bundled_path, prompt):
     return config, True
 
 
+CONNECTION_PROMPT = (
+    "Copy the LAN address and certificate fingerprint from the Mac menu under Connection. "
+    "The pairing key is separate and is not asked here."
+)
+
+
 def prompt_connection():
-    print("Enter the Mac LAN address and certificate fingerprint from the Mac menu.", file=sys.stderr)
-    print("Those menu items are separate from the pairing key.", file=sys.stderr)
+    print(CONNECTION_PROMPT, file=sys.stderr)
     return input("Mac LAN IPv4 address: "), input("Certificate fingerprint: ")
 
 

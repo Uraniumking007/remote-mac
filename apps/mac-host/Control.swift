@@ -12,7 +12,9 @@ var position = CGPoint.zero
 var targetDisplay = CGMainDisplayID()
 let modifierKeys: [UInt16: CGEventFlags] = [
     54: .maskCommand, 55: .maskCommand, 56: .maskShift, 60: .maskShift,
-    58: .maskAlternate, 61: .maskAlternate, 59: .maskControl, 62: .maskControl
+    58: .maskAlternate, 61: .maskAlternate, 59: .maskControl, 62: .maskControl,
+    // Virtual key 63 is Fn. Posting it does not perform Globe gestures.
+    63: .maskSecondaryFn
 ]
 
 let keyboardSource = CGEventSource(stateID: .hidSystemState)
@@ -20,7 +22,7 @@ let deviceModifierBits: [UInt16: UInt64] = [
     54: 0x10, 55: 0x08, 56: 0x02, 60: 0x04,
     58: 0x20, 61: 0x40, 59: 0x01, 62: 0x2000
 ]
-let managedModifiers = CGEventFlags(rawValue: 0x001e207f)
+let managedModifiers = CGEventFlags(rawValue: 0x001e207f | CGEventFlags.maskSecondaryFn.rawValue)
 
 func key(_ code: UInt16, down: Bool) {
     let repeated = down && keys.contains(code)

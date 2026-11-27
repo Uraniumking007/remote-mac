@@ -117,12 +117,150 @@ def run(host, key, fingerprint=None, on_authenticated=None):
 
 
 DISPLAY_KEYS = {63: "mirror", 64: "extend", 65: "primary"}
+FULLSCREEN_SCANCODE = 66
+CLIPBOARD_SCANCODES = {67: "send", 68: "fetch"}
+RELEASE_SCANCODE = 69
+PAUSE_SCANCODE = 72
+LOCAL_SCANCODES = frozenset({*DISPLAY_KEYS, FULLSCREEN_SCANCODE, *CLIPBOARD_SCANCODES, RELEASE_SCANCODE, PAUSE_SCANCODE})
+MAC_FN = 63
+FN_FALLBACKS = (71, 101, None)
+FN_FALLBACK_LABELS = {71: "Scroll Lock", 101: "Menu", None: "Off"}
+DEFAULT_FN_FALLBACK = 71
+FN_LABELS = frozenset({"fn", "function", "globe"})
+BAR_GROUPS = (
+    ("Display", ("mirror", "extend", "primary")),
+    ("Keyboard", ("release", "keymap")),
+    ("Clipboard", ("send", "fetch")),
+    ("View", ("fullscreen",)),
+    ("Session", ("disconnect",)),
+)
+BAR_ACTIONS = tuple(action for _, actions in BAR_GROUPS for action in actions)
+BUTTON_LABELS = {
+    "mirror": "Mirror  F6",
+    "extend": "Extend  F7",
+    "primary": "Primary  F8",
+    "release": "Release input  F12",
+    "keymap": "Key mapping",
+    "send": "Send clipboard  F10",
+    "fetch": "Get clipboard  F11",
+    "disconnect": "Disconnect",
+}
 
 
 REMAPPABLE_KEYS = {226: "Left Alt", 224: "Left Ctrl", 225: "Left Shift",
                    230: "Right Alt", 228: "Right Ctrl", 229: "Right Shift"}
 MAC_MODIFIERS = {55: "Command", 58: "Option", 59: "Control", 56: "Shift", None: "Disabled"}
 MODIFIER_DEFAULTS = {key: {62: 59, 60: 56}.get(MAC_KEYS[key], MAC_KEYS[key]) for key in REMAPPABLE_KEYS}
+
+
+def default_mapping():
+    mapping = MODIFIER_DEFAULTS.copy()
+    mapping["fn"] = DEFAULT_FN_FALLBACK
+    return mapping
+
+
+def button_label(action, fullscreen):
+    if action == "fullscreen":
+        return "Exit fullscreen" if fullscreen else "Fullscreen  F9"
+    return BUTTON_LABELS[action]
+
+
+def layout_connection_bar(groups, button_width, window_width):
+    pad_x = 12
+    button_gap = 6
+    group_gap = 18
+    button_h = 27
+    x = pad_x
+    y = 52
+    row_bottom = y + button_h
+    rects = {}
+    labels = []
+    for title, actions in groups:
+        widths = [button_width(action) for action in actions]
+        group_w = sum(widths) + button_gap * max(0, len(actions) - 1)
+        if x > pad_x and x + group_w > window_width - pad_x:
+            x = pad_x
+            y = row_bottom + 24
+            row_bottom = y + button_h
+        labels.append((title, x, y - 16))
+        for action, width in zip(actions, widths):
+            rects[action] = (x, y, width, button_h)
+            x += width + button_gap
+        x += group_gap - button_gap
+    return rects, row_bottom + 10, labels
+
+
+def connection_bar_open(fullscreen, mouse_y, bar_height, now, hold_until, was_open):
+    if not fullscreen:
+        return True
+    if now < hold_until:
+        return True
+    if mouse_y <= 3:
+        return True
+    return bool(was_open and mouse_y < bar_height)
+
+
+def pointer_in_bar(bar_open, bar_height, y):
+    return bool(bar_open and y < bar_height)
+
+
+def move_bar_focus(current, count, backward):
+    if count <= 0:
+        return None
+    if current is None:
+        return count - 1 if backward else 0
+    step = -1 if backward else 1
+    return (current + step) % count
+
+
+def connection_status(captured, feedback, fullscreen, has_frame=True):
+    if feedback:
+        return feedback
+    if not has_frame and not captured:
+        return "Waiting for the Mac picture."
+    if captured and fullscreen:
+        return "Keyboard is on the Mac. Ctrl+Alt+Pause or F9 exits fullscreen. F12 releases input."
+    if captured:
+        return "Keyboard is on the Mac. F12 releases input."
+    if fullscreen:
+        return "Pointer at the top shows controls. Ctrl+Alt+Pause or F9 exits fullscreen."
+    return "Keyboard is on this PC. Click the picture to control the Mac."
+
+
+def feedback_color(feedback, captured):
+    if feedback:
+        lowered = feedback.lower()
+        if lowered.startswith("could not") or "exceeds" in lowered or "unavailable" in lowered:
+            return (255, 176, 156)
+        return (128, 225, 184)
+    if captured:
+        return (128, 225, 184)
+    return (186, 204, 224)
+
+
+def ctrl_alt_pause(scancode, ctrl_down, alt_down):
+    return scancode == PAUSE_SCANCODE and ctrl_down and alt_down
+
+
+def fn_label(text):
+    label = str(text or "").strip().lower()
+    return label in FN_LABELS
+
+
+def is_physical_fn(key_label, scancode, reserved=LOCAL_SCANCODES):
+    if scancode in reserved:
+        return False
+    return fn_label(key_label)
+
+
+def forwarded_mac_code(scancode, mapping, physical_fn):
+    if scancode in LOCAL_SCANCODES:
+        return None
+    if physical_fn or scancode == mapping.get("fn"):
+        return MAC_FN
+    if scancode in REMAPPABLE_KEYS:
+        return mapping.get(scancode)
+    return MAC_KEYS.get(scancode)
 
 
 # SDL scancodes for the six remappable modifiers, mapped to Win32 virtual keys.
@@ -142,23 +280,27 @@ def windows_key_state():
 
 
 def load_key_mapping(path):
-    mapping = MODIFIER_DEFAULTS.copy()
+    mapping = default_mapping()
     try:
         saved = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return mapping
     if isinstance(saved, dict):
-        for key in mapping:
+        for key in REMAPPABLE_KEYS:
             value = saved.get(str(key), mapping[key])
             if (value is None or type(value) is int) and value in MAC_MODIFIERS:
                 mapping[key] = value
+        if "fn" in saved and saved["fn"] in FN_FALLBACKS:
+            mapping["fn"] = saved["fn"]
     return mapping
 
 
 def save_key_mapping(path, mapping):
+    payload = {str(key): mapping[key] for key in REMAPPABLE_KEYS}
+    payload["fn"] = mapping.get("fn", DEFAULT_FN_FALLBACK)
     path.parent.mkdir(parents=True, exist_ok=True)
     pending = path.with_suffix(".tmp")
-    pending.write_text(json.dumps(mapping), encoding="utf-8")
+    pending.write_text(json.dumps(payload), encoding="utf-8")
     pending.replace(path)
 
 
@@ -170,16 +312,11 @@ def window_loop(pg, clipboard, control, state, mode, notice, resize):
     fullscreen = bool(window.get_flags() & pg.FULLSCREEN)
     windowed_size = resize or ((960, 600) if fullscreen else window.get_size())
     fullscreen_key_held = False
+    pause_combo_held = False
     pg.display.set_caption("Remote Mac")
     heading = pg.font.SysFont("Segoe UI", 19, bold=True)
     font = pg.font.SysFont("Segoe UI", 15)
-    labels = (
-        ("mirror", "Mirror  F6"), ("extend", "Extend  F7"),
-        ("primary", "Primary  F8"), ("release", "Release input  F12"),
-        ("send", "Send clipboard  F10"), ("fetch", "Get clipboard  F11"),
-        ("keymap", "Key mapping"), ("fullscreen", "Fullscreen  F9"), ("disconnect", "Disconnect"),
-    )
-    captions = {key: font.render(label, True, (235, 241, 249)) for key, label in labels}
+    small = pg.font.SysFont("Segoe UI", 12)
     window.fill("black")
     pg.display.flip()
     pg.key.set_repeat(420, 40)
@@ -190,22 +327,27 @@ def window_loop(pg, clipboard, control, state, mode, notice, resize):
     drawn_size = None
     toolbar = {}
     toolbar_height = 0
+    group_labels = []
     scaled = None
     last_paint = None
     feedback = notice.strip(" ·")
     captured = False
+    bar_open = not fullscreen
+    bar_hold_until = time.monotonic() + 3 if fullscreen else 0
+    bar_focus = None
     mapping_path = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".config")) / "Remote Mac" / "key-mapping.json"
     mapping = load_key_mapping(mapping_path)
     settings_open = False
     settings_focus = 0
     settings_items = {}
-    settings_keys = (*REMAPPABLE_KEYS, "reset", "done")
+    settings_keys = (*REMAPPABLE_KEYS, "fn", "reset", "done")
     held_keys = {}
     physical_key_state = windows_key_state()
     held_buttons = set()
     clicks = {}
     click_counts = {}
     heartbeat = 0
+    caption_cache = {}
 
     def send(kind, **fields):
         send_message(control, {"kind": kind, **fields})
@@ -251,7 +393,10 @@ def window_loop(pg, clipboard, control, state, mode, notice, resize):
             return
         updated = mapping.copy()
         if action == "reset":
-            updated = MODIFIER_DEFAULTS.copy()
+            updated = default_mapping()
+        elif action == "fn":
+            choices = FN_FALLBACKS
+            updated["fn"] = choices[(choices.index(mapping["fn"]) + 1) % len(choices)]
         else:
             choices = tuple(MAC_MODIFIERS)
             updated[action] = choices[(choices.index(mapping[action]) + 1) % len(choices)]
@@ -263,88 +408,166 @@ def window_loop(pg, clipboard, control, state, mode, notice, resize):
             mapping.update(updated)
             feedback = "Key mapping saved"
 
+    def session_size():
+        return windowed_size if fullscreen else window.get_size()
+
+    def caption(action):
+        label = button_label(action, fullscreen)
+        cached = caption_cache.get(label)
+        if cached is None:
+            cached = font.render(label, True, (235, 241, 249))
+            caption_cache[label] = cached
+        return cached
+
+    def sdl_key_label(key):
+        try:
+            return pg.key.name(key, use_compat=False)
+        except TypeError:
+            return pg.key.name(key)
+        except Exception:
+            return ""
+
+    def modifiers_down(event):
+        ctrl = bool(event.mod & pg.KMOD_CTRL)
+        alt = bool(event.mod & pg.KMOD_ALT)
+        if physical_key_state is not None:
+            ctrl = ctrl or bool(physical_key_state(0x11) & 0x8000)
+            alt = alt or bool(physical_key_state(0x12) & 0x8000)
+        return ctrl, alt
+
+    def toggle_fullscreen():
+        nonlocal fullscreen, window, windowed_size, drawn_size, feedback, bar_hold_until, bar_open
+        release_input()
+        if not fullscreen:
+            windowed_size = window.get_size()
+        try:
+            window = pg.display.set_mode(windowed_size, pg.RESIZABLE) if fullscreen else pg.display.set_mode((0, 0), pg.FULLSCREEN)
+        except pg.error:
+            feedback = "Could not switch fullscreen"
+        else:
+            fullscreen = not fullscreen
+            drawn_size = None
+            feedback = ""
+            if fullscreen:
+                bar_hold_until = time.monotonic() + 3
+                bar_open = True
+
     while True:
         if state.get("error"):
             raise ConnectionError(state["error"])
         current = state.get("frame")
         window_size = window.get_size()
+        mouse_pos = pg.mouse.get_pos()
+        now = time.monotonic()
+        bar_open = connection_bar_open(fullscreen, mouse_pos[1], toolbar_height or 89, now, bar_hold_until, bar_open)
         resized = window_size != drawn_size
         new_frame = current is not frame
         if resized:
-            toolbar.clear()
-            x, y = 12, 39
-            for action, _ in (() if fullscreen else labels):
-                width = captions[action].get_width() + 22
-                if x > 12 and x + width > window_size[0] - 12:
-                    x, y = 12, y + 32
-                toolbar[action] = pg.Rect(x, y, width, 27)
-                x += width + 6
-            toolbar_height = 0 if fullscreen else y + 37
+            def button_width(action):
+                return caption(action).get_width() + 22
+
+            rects, toolbar_height, group_labels = layout_connection_bar(BAR_GROUPS, button_width, window_size[0])
+            toolbar = {action: pg.Rect(rect) for action, rect in rects.items()}
             drawn_size = window_size
+            bar_open = connection_bar_open(fullscreen, mouse_pos[1], toolbar_height, now, bar_hold_until, bar_open)
         if current is not None and (new_frame or resized):
             if new_frame:
                 frame = current
                 surface = pg.image.frombuffer(frame[2], frame[:2], "RGB")
-            viewport = pg.Rect(0, toolbar_height, window_size[0], max(1, window_size[1] - toolbar_height))
+            top = 0 if fullscreen else toolbar_height
+            viewport = pg.Rect(0, top, window_size[0], max(1, window_size[1] - top))
             area = surface.get_rect().fit(viewport)
             area.center = viewport.center
             scaled = None
             if area.width and area.height:
                 scaled = surface if surface.get_size() == area.size else pg.transform.smoothscale(surface, area.size)
 
-        hovered = next((action for action, rect in toolbar.items() if rect.collidepoint(pg.mouse.get_pos())), None)
-        paint = (captured, feedback, hovered, settings_open, settings_focus, tuple(mapping.values()))
+        visible = toolbar if bar_open else {}
+        hovered = next((action for action, rect in visible.items() if rect.collidepoint(mouse_pos)), None)
+        status_text = connection_status(captured, feedback, fullscreen, frame is not None)
+        paint = (captured, feedback, hovered, settings_open, settings_focus, bar_focus, bar_open, fullscreen,
+                 tuple(mapping.values()), status_text)
         if resized or new_frame or paint != last_paint:
             window.fill((6, 10, 16))
             if scaled is not None:
                 window.blit(scaled, area)
-            if not fullscreen:
+            if bar_open:
                 pg.draw.rect(window, (19, 27, 41), (0, 0, window_size[0], toolbar_height))
                 pg.draw.line(window, (53, 67, 88), (0, toolbar_height - 1), (window_size[0], toolbar_height - 1))
                 title_surface = heading.render("Remote Mac", True, (239, 245, 253))
-                window.blit(title_surface, (12, 9))
-                indicator = feedback or ("Input captured" if captured else "Click the desktop to control" if frame else "Waiting for video…")
-                color = (128, 225, 184) if captured else (164, 183, 207)
-                window.blit(font.render(indicator, True, color), (title_surface.get_width() + 28, 13))
-                for action, rect in toolbar.items():
-                    color = (41, 92, 152) if action == mode else (57, 73, 99) if action == hovered else (34, 46, 65)
+                window.blit(title_surface, (12, 8))
+                color = feedback_color(feedback, captured)
+                window.blit(font.render(status_text, True, color), (title_surface.get_width() + 20, 11))
+                for title, x, y in group_labels:
+                    window.blit(small.render(title, True, (148, 168, 194)), (x, y))
+                focused = None if captured or bar_focus is None else BAR_ACTIONS[bar_focus]
+                for action, rect in visible.items():
+                    if action == "fullscreen" and fullscreen:
+                        color = (184, 112, 64) if action == hovered else (158, 92, 48)
+                    elif action == mode:
+                        color = (41, 92, 152)
+                    elif action == hovered:
+                        color = (57, 73, 99)
+                    else:
+                        color = (34, 46, 65)
                     pg.draw.rect(window, color, rect, border_radius=5)
-                    window.blit(captions[action], captions[action].get_rect(center=rect.center))
+                    if action == focused:
+                        pg.draw.rect(window, (135, 187, 246), rect, 2, border_radius=5)
+                    label = caption(action)
+                    window.blit(label, label.get_rect(center=rect.center))
             if settings_open:
                 settings_items.clear()
-                width = max(1, min(420, window_size[0] - 16))
-                panel = pg.Rect(0, 0, width, 290)
+                row_keys = (*REMAPPABLE_KEYS, "fn")
+                width = max(280, min(540, window_size[0] - 16))
+                panel = pg.Rect(0, 0, width, min(window_size[1] - 8, 124 + len(row_keys) * 30))
                 panel.center = (window_size[0] // 2, window_size[1] // 2)
                 panel.top = max(4, panel.top)
                 pg.draw.rect(window, (24, 34, 51), panel, border_radius=8)
                 pg.draw.rect(window, (84, 111, 147), panel, 1, border_radius=8)
                 window.blit(heading.render("Key mapping", True, (239, 245, 253)), (panel.x + 14, panel.y + 10))
-                window.blit(font.render("Select a mapping to change it. Changes save automatically.", True,
-                                        (164, 183, 207)), (panel.x + 14, panel.y + 35))
-                for index, key in enumerate(settings_keys):
-                    if key in REMAPPABLE_KEYS:
-                        y = panel.y + 59 + index * 30
-                        window.blit(font.render(REMAPPABLE_KEYS[key], True, (235, 241, 249)), (panel.x + 14, y + 5))
-                        rect = pg.Rect(panel.right - 134, y, 120, 25)
-                        label = MAC_MODIFIERS[mapping[key]]
+                window.blit(small.render("Scroll Lock is the Fn fallback. A detected Fn key is sent too.", True,
+                                         (164, 183, 207)), (panel.x + 14, panel.y + 36))
+                window.blit(small.render("Globe gestures and firmware-only keys are not forwarded.", True,
+                                         (164, 183, 207)), (panel.x + 14, panel.y + 54))
+                for index, key in enumerate(row_keys):
+                    y = panel.y + 78 + index * 30
+                    if key == "fn":
+                        title = "Fn / Globe fallback"
+                        label = FN_FALLBACK_LABELS[mapping["fn"]]
                     else:
-                        rect = pg.Rect(panel.x + 14 if key == "reset" else panel.right - 84, panel.bottom - 39,
-                                       111 if key == "reset" else 70, 27)
-                        label = "Reset defaults" if key == "reset" else "Done"
+                        title = REMAPPABLE_KEYS[key]
+                        label = MAC_MODIFIERS[mapping[key]]
+                    window.blit(font.render(title, True, (235, 241, 249)), (panel.x + 14, y + 5))
+                    rect = pg.Rect(panel.right - 150, y, 136, 25)
                     settings_items[key] = rect
-                    pg.draw.rect(window, (49, 77, 110) if settings_focus == index else (34, 46, 65), rect, border_radius=4)
-                    if settings_focus == index:
+                    selected = settings_focus == index
+                    pg.draw.rect(window, (49, 77, 110) if selected else (34, 46, 65), rect, border_radius=4)
+                    if selected:
                         pg.draw.rect(window, (135, 187, 246), rect, 1, border_radius=4)
                     text = font.render(label, True, (235, 241, 249))
+                    window.blit(text, text.get_rect(center=rect.center))
+                for key, place in (("reset", 0), ("done", 1)):
+                    rect = pg.Rect(panel.x + 14 if key == "reset" else panel.right - 84, panel.bottom - 39,
+                                   130 if key == "reset" else 70, 27)
+                    settings_items[key] = rect
+                    selected = settings_focus == settings_keys.index(key)
+                    pg.draw.rect(window, (49, 77, 110) if selected else (34, 46, 65), rect, border_radius=4)
+                    if selected:
+                        pg.draw.rect(window, (135, 187, 246), rect, 1, border_radius=4)
+                    text = font.render("Reset defaults" if key == "reset" else "Done", True, (235, 241, 249))
                     window.blit(text, text.get_rect(center=rect.center))
             last_paint = paint
             pg.display.flip()
 
         for event in pg.event.get():
             if event.type == pg.QUIT:
-                return None, windowed_size if fullscreen else window.get_size()
+                return None, session_size()
             if settings_open:
-                if event.type == pg.KEYDOWN:
+                if event.type == pg.KEYUP and event.scancode == FULLSCREEN_SCANCODE:
+                    fullscreen_key_held = False
+                elif event.type == pg.KEYUP and event.scancode == PAUSE_SCANCODE:
+                    pause_combo_held = False
+                elif event.type == pg.KEYDOWN:
                     if event.key == pg.K_ESCAPE:
                         settings_open = False
                     elif event.key == pg.K_TAB:
@@ -359,42 +582,53 @@ def window_loop(pg, clipboard, control, state, mode, notice, resize):
                             edit_mapping(key)
                             break
                 continue
-            if event.type == pg.KEYUP and event.scancode == 66:
+            if event.type == pg.KEYUP and event.scancode == FULLSCREEN_SCANCODE:
                 fullscreen_key_held = False
                 continue
+            if event.type == pg.KEYUP and event.scancode == PAUSE_SCANCODE:
+                pause_combo_held = False
+                continue
             action = None
-            if event.type == pg.KEYDOWN:
-                if event.scancode == 66:
-                    if fullscreen_key_held:
+            if event.type == pg.KEYDOWN and event.scancode == PAUSE_SCANCODE:
+                if ctrl_alt_pause(event.scancode, *modifiers_down(event)) and not pause_combo_held:
+                    pause_combo_held = True
+                    toggle_fullscreen()
+                continue
+            if event.type == pg.KEYDOWN and event.scancode == FULLSCREEN_SCANCODE:
+                if fullscreen_key_held:
+                    continue
+                fullscreen_key_held = True
+                action = "fullscreen"
+            elif event.type == pg.KEYDOWN:
+                action = DISPLAY_KEYS.get(event.scancode) or CLIPBOARD_SCANCODES.get(event.scancode)
+                if event.scancode == RELEASE_SCANCODE:
+                    action = "release"
+                if action is None and not captured:
+                    if event.key == pg.K_TAB:
+                        bar_focus = move_bar_focus(bar_focus, len(BAR_ACTIONS), bool(event.mod & pg.KMOD_SHIFT))
                         continue
-                    fullscreen_key_held = True
-                action = DISPLAY_KEYS.get(event.scancode) or {66: "fullscreen", 67: "send", 68: "fetch", 69: "release"}.get(event.scancode)
-            elif event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
-                action = next((key for key, rect in toolbar.items() if rect.collidepoint(event.pos)), None)
+                    if bar_focus is not None and event.key in (pg.K_LEFT, pg.K_RIGHT):
+                        bar_focus = move_bar_focus(bar_focus, len(BAR_ACTIONS), event.key == pg.K_LEFT)
+                        continue
+                    if bar_focus is not None and event.key in (pg.K_RETURN, pg.K_SPACE):
+                        action = BAR_ACTIONS[bar_focus]
+            elif event.type == pg.MOUSEBUTTONDOWN and event.button == 1 and bar_open:
+                action = next((key for key, rect in visible.items() if rect.collidepoint(event.pos)), None)
             if action:
                 if action == "fullscreen":
-                    release_input()
-                    if not fullscreen:
-                        windowed_size = window.get_size()
-                    try:
-                        window = pg.display.set_mode(windowed_size, pg.RESIZABLE) if fullscreen else pg.display.set_mode((0, 0), pg.FULLSCREEN)
-                    except pg.error:
-                        feedback = "Could not switch fullscreen"
-                    else:
-                        fullscreen = not fullscreen
-                        drawn_size = None
-                        feedback = ""
+                    toggle_fullscreen()
                     continue
                 if action == "keymap":
                     release_input()
                     settings_open = True
                     settings_focus = 0
+                    bar_focus = None
                 if action == "disconnect":
                     release_input()
-                    return None, windowed_size if fullscreen else window.get_size()
+                    return None, session_size()
                 if action in DISPLAY_KEYS.values() and action != mode:
                     release_input()
-                    return action, windowed_size if fullscreen else window.get_size()
+                    return action, session_size()
                 if action == "release":
                     release_input()
                     feedback = ""
@@ -403,8 +637,19 @@ def window_loop(pg, clipboard, control, state, mode, notice, resize):
                 continue
             if event.type == pg.WINDOWFOCUSLOST:
                 fullscreen_key_held = False
+                pause_combo_held = False
                 release_input()
                 feedback = ""
+                continue
+            pointer_y = event.pos[1] if getattr(event, "pos", None) is not None else pg.mouse.get_pos()[1]
+            in_bar = event.type in (pg.MOUSEMOTION, pg.MOUSEBUTTONDOWN, pg.MOUSEBUTTONUP, pg.MOUSEWHEEL) and pointer_in_bar(
+                bar_open, toolbar_height, pointer_y)
+            releasing_held_button = (
+                event.type == pg.MOUSEBUTTONUP
+                and event.button in MAC_BUTTONS
+                and MAC_BUTTONS[event.button] in held_buttons
+            )
+            if in_bar and not releasing_held_button:
                 continue
             if not captured:
                 if event.type != pg.MOUSEBUTTONDOWN or event.button != 1 or not area or not area.collidepoint(event.pos):
@@ -414,10 +659,9 @@ def window_loop(pg, clipboard, control, state, mode, notice, resize):
                 feedback = ""
                 continue
             if event.type in (pg.KEYDOWN, pg.KEYUP):
-                if event.scancode in DISPLAY_KEYS or event.scancode in (66, 67, 68, 69):
-                    continue
+                physical = is_physical_fn(sdl_key_label(event.key), event.scancode)
+                code = forwarded_mac_code(event.scancode, mapping, physical)
                 if event.type == pg.KEYDOWN:
-                    code = mapping.get(event.scancode, MAC_KEYS.get(event.scancode))
                     if code is not None:
                         if event.scancode in held_keys or code not in held_keys.values():
                             send("key", code=code, down=True)
